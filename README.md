@@ -1,6 +1,6 @@
 # TheCob mod manager for macOS, Linux and Steam Deck
 
-A single-file installer and updater for the [TheCob](https://valheim.hexium.gg/mods/TheCob/TheCob) Valheim modpack on macOS, Linux and Steam Deck. The script keeps its original name, `the-cob-mac-mod-manager.sh`.
+A single-file installer and updater for the [TheCob](https://valheim.hexium.gg/mods/TheCob/TheCob) Valheim modpack on macOS, Linux and Steam Deck.
 
 There is no mod manager for macOS: [Gale](https://github.com/Kesomannen/gale) ships Windows and Linux builds only, and so does [r2modman](https://github.com/ebkr/r2modmanPlus). This script covers that gap, and runs the same way on Linux and Steam Deck, so every machine you play on is set up with one command. It resolves the newest version of every mod in the pack, installs what changed, and leaves everything else alone.
 
@@ -22,7 +22,7 @@ On either platform, `jq` is used when present and not required.
 ## Install
 
 ```sh
-bash the-cob-mac-mod-manager.sh
+bash thecob-valheim-mods.sh
 ```
 
 On Steam Deck, switch to Desktop Mode, open Konsole, and run the same command.
@@ -38,7 +38,7 @@ It checks each Steam install (on Linux: `~/.local/share/Steam`, `~/.steam/steam`
 If detection fails, point it directly:
 
 ```sh
-bash the-cob-mac-mod-manager.sh --dir "/path/to/steamapps/common/Valheim"
+bash thecob-valheim-mods.sh --dir "/path/to/steamapps/common/Valheim"
 ```
 
 ### Then set the Steam launch options — once per machine
@@ -62,12 +62,12 @@ The script deliberately does not set launch options for you. Steam stores launch
 ## Usage
 
 ```sh
-bash the-cob-mac-mod-manager.sh              # install, or update to newest
-bash the-cob-mac-mod-manager.sh --check      # report what would change, touch nothing
-bash the-cob-mac-mod-manager.sh --verify     # inspect what's installed; no network, no writes
-bash the-cob-mac-mod-manager.sh --force      # reinstall everything at newest
-bash the-cob-mac-mod-manager.sh --dir PATH   # point at Valheim explicitly
-bash the-cob-mac-mod-manager.sh --keep-downloads
+bash thecob-valheim-mods.sh              # install, or update to newest
+bash thecob-valheim-mods.sh --check      # report what would change, touch nothing
+bash thecob-valheim-mods.sh --verify     # inspect what's installed; no network, no writes
+bash thecob-valheim-mods.sh --force      # reinstall everything at newest
+bash thecob-valheim-mods.sh --dir PATH   # point at Valheim explicitly
+bash thecob-valheim-mods.sh --keep-downloads
 ```
 
 Re-run it whenever you want updates. It records installed versions in `BepInEx/.modpack-versions`, compares against what the registries currently serve, and downloads only what actually changed — a run with nothing new exits in a couple of seconds.

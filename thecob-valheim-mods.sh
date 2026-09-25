@@ -1,17 +1,17 @@
 #!/bin/bash
 #
-# the-cob-mac-mod-manager.sh — install and update the TheCob mod set for
+# thecob-valheim-mods.sh — install and update the TheCob mod set for
 # Valheim on macOS, Linux and Steam Deck
 #
 # Resolves the newest published version of every mod, installs what changed,
 # and leaves everything else alone. Safe to re-run whenever you want updates.
 #
-#   bash the-cob-mac-mod-manager.sh              install / update to newest
-#   bash the-cob-mac-mod-manager.sh --check      report what would change, touch nothing
-#   bash the-cob-mac-mod-manager.sh --verify     inspect what's installed; no network, no writes
-#   bash the-cob-mac-mod-manager.sh --force      reinstall everything at newest
-#   bash the-cob-mac-mod-manager.sh --dir PATH   point at Valheim explicitly
-#   bash the-cob-mac-mod-manager.sh --keep-downloads
+#   bash thecob-valheim-mods.sh              install / update to newest
+#   bash thecob-valheim-mods.sh --check      report what would change, touch nothing
+#   bash thecob-valheim-mods.sh --verify     inspect what's installed; no network, no writes
+#   bash thecob-valheim-mods.sh --force      reinstall everything at newest
+#   bash thecob-valheim-mods.sh --dir PATH   point at Valheim explicitly
+#   bash thecob-valheim-mods.sh --keep-downloads
 #
 # Your settings are never clobbered: files already in BepInEx/config/ are left
 # as they are, and a replaced mod is moved aside into BepInEx/.replaced-<stamp>/
