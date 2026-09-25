@@ -1,16 +1,17 @@
 #!/bin/bash
 #
-# valheim-mods.sh — install and update the TheCob mod set for Valheim on macOS
+# the-cob-mac-mod-manager.sh — install and update the TheCob mod set for
+# Valheim on macOS, Linux and Steam Deck
 #
 # Resolves the newest published version of every mod, installs what changed,
 # and leaves everything else alone. Safe to re-run whenever you want updates.
 #
-#   bash valheim-mods.sh              install / update to newest
-#   bash valheim-mods.sh --check      report what would change, touch nothing
-#   bash valheim-mods.sh --verify     inspect what's installed; no network, no writes
-#   bash valheim-mods.sh --force      reinstall everything at newest
-#   bash valheim-mods.sh --dir PATH   point at Valheim explicitly
-#   bash valheim-mods.sh --keep-downloads
+#   bash the-cob-mac-mod-manager.sh              install / update to newest
+#   bash the-cob-mac-mod-manager.sh --check      report what would change, touch nothing
+#   bash the-cob-mac-mod-manager.sh --verify     inspect what's installed; no network, no writes
+#   bash the-cob-mac-mod-manager.sh --force      reinstall everything at newest
+#   bash the-cob-mac-mod-manager.sh --dir PATH   point at Valheim explicitly
+#   bash the-cob-mac-mod-manager.sh --keep-downloads
 #
 # Your settings are never clobbered: files already in BepInEx/config/ are left
 # as they are, and a replaced mod is moved aside into BepInEx/.replaced-<stamp>/
@@ -50,6 +51,14 @@ MODS=(
 # Whose dependency pins we compare against, to detect drift.
 PACK_NAME="TheCob"; PACK_OWNER="TheCob"; PACK_REG="$HEX"
 
+# Steam launch options each Valheim build needs.
+LAUNCH_MAC='/usr/bin/arch -x86_64 /bin/bash ./start_game_bepinex.sh %command%'
+LAUNCH_NATIVE='./start_game_bepinex.sh %command%'
+LAUNCH_PROTON='WINEDLLOVERRIDES="winhttp=n,b" %command%'
+
+# Read to recognize SteamOS, for the Desktop Mode note.
+OS_RELEASE="/etc/os-release"
+
 VALHEIM=""; CHECK_ONLY=0; FORCE=0; KEEP_DOWNLOADS=0; VERIFY=0
 
 say()  { printf '%s\n' "$*"; }
@@ -64,27 +73,78 @@ while [ $# -gt 0 ]; do
     --verify)         VERIFY=1; shift ;;
     --force)          FORCE=1; shift ;;
     --keep-downloads) KEEP_DOWNLOADS=1; shift ;;
-    -h|--help)        sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help)        sed -n '2,/^$/p' "$0"; exit 0 ;;
     *)                die "unknown option: $1" ;;
   esac
 done
 
+# ------------------------------------------------------------------ platform
+
+os="$(uname -s)"
+case "$os" in
+  Darwin) PLATFORM=mac ;;
+  Linux)  PLATFORM=linux ;;
+  *)      die "unsupported system: $os. This script runs on macOS and Linux, including Steam Deck.
+       On Windows, use a mod manager such as Gale or r2modman." ;;
+esac
+
+missing=""
+for tool in curl unzip; do
+  if ! command -v "$tool" >/dev/null 2>&1; then missing="$missing $tool"; fi
+done
+if [ -n "$missing" ]; then die "missing required tool(s):$missing"; fi
+
+IS_DECK=0
+if [ "$PLATFORM" = linux ] && [ -r "$OS_RELEASE" ] \
+   && grep -Eqi '^ID="?steamos"?$' "$OS_RELEASE"; then
+  IS_DECK=1
+fi
+
 # ---------------------------------------------------------------- locate game
 
-find_valheim() {
-  local default="$HOME/Library/Application Support/Steam/steamapps/common/Valheim"
-  local vdf="$HOME/Library/Application Support/Steam/steamapps/libraryfolders.vdf"
-  local candidates=() c p
-  candidates+=("$default")
-  if [ -f "$vdf" ]; then
-    while IFS= read -r p; do
-      if [ -n "$p" ]; then candidates+=("$p/steamapps/common/Valheim"); fi
-    done < <(sed -n 's/.*"path"[[:space:]]*"\([^"]*\)".*/\1/p' "$vdf")
+steam_roots() { # existing Steam install roots for this platform, one per line
+  local r
+  if [ "$PLATFORM" = mac ]; then
+    set -- "$HOME/Library/Application Support/Steam"
+  else
+    set -- "$HOME/.local/share/Steam" "$HOME/.steam/steam" "$HOME/.steam/root" \
+           "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam"
   fi
-  for c in "${candidates[@]}"; do
-    if [ -d "$c" ]; then printf '%s\n' "$c"; return 0; fi
+  for r in "$@"; do
+    if [ -d "$r" ]; then printf '%s\n' "$r"; fi
   done
+}
+
+looks_like_valheim() { # <dir>
+  [ -e "$1/valheim_Data" ] || [ -e "$1/valheim.x86_64" ] \
+    || [ -e "$1/valheim.app" ] || [ -e "$1/Valheim.app" ] \
+    || [ -e "$1/valheim.exe" ] || [ -e "$1/Valheim.exe" ]
+}
+
+# Each Steam root, then every library its libraryfolders.vdf lists (an SD card,
+# a second drive). A folder Steam left behind after moving the game is skipped.
+find_valheim() {
+  local root lib
+  while IFS= read -r root; do
+    if looks_like_valheim "$root/steamapps/common/Valheim"; then
+      printf '%s\n' "$root/steamapps/common/Valheim"; return 0
+    fi
+    if [ -f "$root/steamapps/libraryfolders.vdf" ]; then
+      while IFS= read -r lib; do
+        if [ -n "$lib" ] && looks_like_valheim "$lib/steamapps/common/Valheim"; then
+          printf '%s\n' "$lib/steamapps/common/Valheim"; return 0
+        fi
+      done < <(sed -n 's/.*"path"[[:space:]]*"\([^"]*\)".*/\1/p' "$root/steamapps/libraryfolders.vdf")
+    fi
+  done < <(steam_roots)
   return 1
+}
+
+detect_runtime() { # <dir> -> mac | linux-native | proton | unknown
+  if [ -e "$1/valheim.x86_64" ]; then echo linux-native
+  elif [ -e "$1/valheim.app" ] || [ -e "$1/Valheim.app" ]; then echo mac
+  elif [ -e "$1/valheim.exe" ] || [ -e "$1/Valheim.exe" ]; then echo proton
+  else echo unknown; fi
 }
 
 step "Locating Valheim"
@@ -94,12 +154,19 @@ if [ -z "$VALHEIM" ]; then
          bash $0 --dir \"/the/path/you/see\""
 fi
 [ -d "$VALHEIM" ] || die "not a directory: $VALHEIM"
-if [ ! -e "$VALHEIM/valheim.app" ] && [ ! -e "$VALHEIM/Valheim.app" ] \
-   && [ ! -e "$VALHEIM/valheim_Data" ] && [ ! -e "$VALHEIM/Valheim.exe" ]; then
-  die "$VALHEIM does not look like a Valheim install. Pass the right one with --dir."
-fi
+looks_like_valheim "$VALHEIM" \
+  || die "$VALHEIM does not look like a Valheim install. Pass the right one with --dir."
 [ -w "$VALHEIM" ] || die "no write permission on $VALHEIM"
+
+RUNTIME="$(detect_runtime "$VALHEIM")"
+case "$RUNTIME" in
+  mac)          LAUNCH="$LAUNCH_MAC";    desc="macOS build" ;;
+  linux-native) LAUNCH="$LAUNCH_NATIVE"; desc="native Linux build" ;;
+  proton)       LAUNCH="$LAUNCH_PROTON"; desc="Windows build under Proton" ;;
+  *)            LAUNCH="";               desc="couldn't tell which build this is" ;;
+esac
 say "    $VALHEIM"
+say "    runtime: $RUNTIME ($desc)"
 
 STATE="$VALHEIM/BepInEx/.modpack-versions"
 
@@ -111,14 +178,26 @@ if [ "$VERIFY" -eq 1 ]; then
   mark() { if [ "$1" = y ]; then ok=$((ok+1)); printf '    ok    %s\n' "$2"
            else bad=$((bad+1)); printf '    MISS  %s\n' "$2"; fi; }
 
+  # What each build loads BepInEx through. The macOS and Linux builds start via
+  # start_game_bepinex.sh, which preloads the doorstop library; the Windows
+  # build under Proton loads winhttp.dll, which reads doorstop_config.ini.
+  case "$RUNTIME" in
+    mac)          loader="BepInEx doorstop_libs/libdoorstop_x64.dylib start_game_bepinex.sh" ;;
+    linux-native) loader="BepInEx doorstop_libs/libdoorstop_x64.so start_game_bepinex.sh" ;;
+    proton)       loader="BepInEx doorstop_config.ini winhttp.dll" ;;
+    *)            loader="BepInEx" ;;
+  esac
+
   step "Loader files"
-  for f in BepInEx doorstop_config.ini winhttp.dll start_game_bepinex.sh; do
+  for f in $loader; do
     if [ -e "$VALHEIM/$f" ]; then mark y "$f"; else mark n "$f"; fi
   done
-  if [ -x "$VALHEIM/start_game_bepinex.sh" ]; then
-    mark y "start_game_bepinex.sh is executable"
-  else
-    mark n "start_game_bepinex.sh is NOT executable  (fix: chmod u+x)"
+  if [ "$RUNTIME" != proton ]; then
+    if [ -x "$VALHEIM/start_game_bepinex.sh" ]; then
+      mark y "start_game_bepinex.sh is executable"
+    else
+      mark n "start_game_bepinex.sh is NOT executable  (fix: chmod u+x)"
+    fi
   fi
 
   step "Installed mods"
@@ -144,34 +223,78 @@ if [ "$VERIFY" -eq 1 ]; then
     warn "no version state file — this install predates the script, or never ran"
   fi
 
-  step "Rosetta"
-  if /usr/bin/arch -x86_64 /usr/bin/true >/dev/null 2>&1; then
-    mark y "Rosetta 2 present"
-  else
-    mark n "Rosetta 2 MISSING  (fix: softwareupdate --install-rosetta)"
+  if [ "$PLATFORM" = mac ]; then
+    step "Rosetta"
+    if /usr/bin/arch -x86_64 /usr/bin/true >/dev/null 2>&1; then
+      mark y "Rosetta 2 present"
+    else
+      mark n "Rosetta 2 MISSING  (fix: softwareupdate --install-rosetta)"
+    fi
   fi
 
+  # Valheim's own block only (app 892970), so another game's options are never
+  # mistaken for it. Steam escapes quotes inside values as \".
+  launch_options() { # <localconfig.vdf>
+    awk '
+      !inapp && /^[[:space:]]*"892970"[[:space:]]*$/ { pending = 1; next }
+      pending { pending = 0; if ($0 ~ /^[[:space:]]*\{[[:space:]]*$/) { inapp = 1; depth = 1 }; next }
+      inapp && /^[[:space:]]*\{/ { depth++; next }
+      inapp && /^[[:space:]]*\}/ { if (--depth == 0) inapp = 0; next }
+      inapp && depth == 1 && /^[[:space:]]*"LaunchOptions"[[:space:]]/ {
+        v = $0
+        sub(/^[[:space:]]*"LaunchOptions"[[:space:]]*"/, "", v)
+        sub(/"[[:space:]]*$/, "", v)
+        gsub(/\\"/, "\"", v)
+        print v; exit
+      }
+    ' "$1"
+  }
+  lo_miss() { mark n "$1"; say "          set them to:"; say "          $LAUNCH"; }
+
   step "Steam launch options"
-  lo=""
-  for cfg in "$HOME/Library/Application Support/Steam/userdata"/*/config/localconfig.vdf; do
-    [ -f "$cfg" ] || continue
-    cand=$(grep -A 40 '"892970"' "$cfg" 2>/dev/null \
-           | sed -n 's/.*"LaunchOptions"[[:space:]]*"\(.*\)".*/\1/p' | head -1)
-    if [ -n "$cand" ]; then lo="$cand"; break; fi
-  done
-  if [ -z "$lo" ]; then
-    mark n "no launch options set for Valheim -> mods will NOT load"
-    say "          set them to:"
-    say "          /usr/bin/arch -x86_64 /bin/bash ./start_game_bepinex.sh %command%"
+  lo=""; found_cfg=0
+  while IFS= read -r root; do
+    for cfg in "$root/userdata"/*/config/localconfig.vdf; do
+      [ -f "$cfg" ] || continue
+      found_cfg=1
+      lo="$(launch_options "$cfg")"
+      if [ -n "$lo" ]; then break 2; fi
+    done
+  done < <(steam_roots)
+
+  if [ "$RUNTIME" = unknown ]; then
+    if [ -n "$lo" ]; then say "    found: $lo"; fi
+    warn "can't tell which Valheim build this is, so launch options weren't checked"
+  elif [ -z "$lo" ] && [ "$found_cfg" -eq 0 ]; then
+    lo_miss "couldn't find Steam's localconfig.vdf to read launch options from"
+  elif [ -z "$lo" ]; then
+    lo_miss "no launch options set for Valheim -> mods will NOT load"
   else
     say "    found: $lo"
-    case "$lo" in
-      *start_game_bepinex.sh*)
+    case "$RUNTIME" in
+      mac)
         case "$lo" in
-          *-x86_64*) mark y "forces Rosetta and runs the BepInEx launcher" ;;
-          *) mark n "runs the launcher but does NOT force x86_64 -> mods will NOT load" ;;
+          *start_game_bepinex.sh*)
+            case "$lo" in
+              *-x86_64*) mark y "forces Rosetta and runs the BepInEx launcher" ;;
+              *) lo_miss "runs the launcher but does NOT force x86_64 -> mods will NOT load" ;;
+            esac ;;
+          *WINEDLLOVERRIDES*) lo_miss "sets the Proton override, which does nothing for the macOS build -> mods will NOT load" ;;
+          *) lo_miss "does not run start_game_bepinex.sh -> mods will NOT load" ;;
         esac ;;
-      *) mark n "does not run start_game_bepinex.sh -> mods will NOT load" ;;
+      linux-native)
+        case "$lo" in
+          *"arch -x86_64"*) lo_miss "uses the macOS Rosetta wrapper (arch -x86_64), which fails on Linux" ;;
+          *start_game_bepinex.sh*) mark y "runs the BepInEx launcher" ;;
+          *WINEDLLOVERRIDES*) lo_miss "sets the Proton override, but this is the native Linux build -> mods will NOT load" ;;
+          *) lo_miss "does not run start_game_bepinex.sh -> mods will NOT load" ;;
+        esac ;;
+      proton)
+        case "$lo" in
+          *start_game_bepinex.sh*) lo_miss "runs the native launcher, which doesn't work for the Windows build under Proton" ;;
+          *WINEDLLOVERRIDES*winhttp=n*) mark y "sets the winhttp override Proton needs" ;;
+          *) lo_miss "does not set the winhttp override -> mods will NOT load" ;;
+        esac ;;
     esac
   fi
   say ""
@@ -480,13 +603,38 @@ FIRST-TIME SETUP — do this once in Steam:
 
   Steam -> Valheim -> Properties -> General -> Launch Options, paste:
 
-      /usr/bin/arch -x86_64 /bin/bash ./start_game_bepinex.sh %command%
-
+EOF
+  if [ -n "$LAUNCH" ]; then
+    say "      $LAUNCH"
+  else
+    say "  Couldn't tell which Valheim build this is. Use the line for yours:"
+    say ""
+    say "      macOS:          $LAUNCH_MAC"
+    say "      Linux native:   $LAUNCH_NATIVE"
+    say "      Proton:         $LAUNCH_PROTON"
+  fi
+  say ""
+  if [ "$RUNTIME" = mac ]; then
+    cat <<'EOF'
   Required on Apple Silicon: BepInEx depends on MonoMod, which has no arm64
   build, so the game must be forced through Rosetta. Without it Valheim
   launches normally and loads none of your mods.
   (Rosetta not installed yet? softwareupdate --install-rosetta)
 
-  Verify after launching:  tail -f "$VALHEIM/BepInEx/LogOutput.log"
 EOF
+  elif [ "$RUNTIME" = proton ]; then
+    cat <<'EOF'
+  Keep the quotes exactly as shown. The override makes Proton load BepInEx's
+  winhttp.dll instead of its own; without it Valheim loads none of your mods.
+
+EOF
+  fi
+  if [ "$IS_DECK" -eq 1 ]; then
+    cat <<'EOF'
+  On Steam Deck, set this in Desktop Mode, in the Steam window here. It carries
+  over into Game Mode.
+
+EOF
+  fi
+  say "  Verify after launching:  tail -f \"$VALHEIM/BepInEx/LogOutput.log\""
 fi
