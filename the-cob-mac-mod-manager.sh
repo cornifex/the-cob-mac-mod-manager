@@ -36,11 +36,15 @@ MODS=(
 "Recycle_N_Reclaim|Azumatt|$HEX"
 "AzuCraftyBoxes|Azumatt|$HEX"
 "AAA_Crafting|Azumatt|$HEX"
+"AzuAreaRepair|Azumatt|$HEX"
 "OdinHorse|OdinPlus|$HEX"
 "MultiUserChest|MSchmoecker|$HEX"
 "ConditionalConfigSync|shudnal|$HEX"
 "ExtraSlots|shudnal|$HEX"
+"UsefulPaths|RustyMods|$HEX"
+"Sailing|Smoothbrain|$HEX"
 "Quick_Stack_Store_Sort_Trash_Restock|Goldenrevolver|$TS"
+"Pathfinder|Crystal|$TS"
 )
 
 # Whose dependency pins we compare against, to detect drift.
@@ -135,6 +139,7 @@ if [ "$VERIFY" -eq 1 ]; then
   say "    $tot plugin DLLs total"
   if [ -f "$STATE" ]; then
     say "    loader: $(awk -F'\t' '$1=="BepInExPack_Valheim"{print $2}' "$STATE")"
+    say "    pack:   $PACK_NAME $(awk -F'\t' -v k="$PACK_NAME" '$1==k{print $2}' "$STATE")"
   else
     warn "no version state file — this install predates the script, or never ran"
   fi
@@ -233,39 +238,54 @@ step "Resolving newest versions"
 NAMES=(); VERS=(); URLS=(); PREV=(); ACTION=()
 changed=0
 
-resolve_one() { # <entry>  -> appends to the parallel arrays
-  local entry="$1" name owner reg ver url prev act
-  name="${entry%%|*}"; local rest="${entry#*|}"
+resolve() { # <entry>  -> sets R_NAME R_VER R_URL R_PREV R_ACT
+  local owner reg rest
+  R_NAME="${1%%|*}"; rest="${1#*|}"
   owner="${rest%%|*}"; reg="${rest#*|}"
 
-  api_get "$owner" "$name" "$reg" "$WORK/$name.json"
-  ver="$(json_scalar "$WORK/$name.json" version_number)"
-  url="$(json_scalar "$WORK/$name.json" download_url)"
-  [ -n "$ver" ] && [ -n "$url" ] \
-    || die "could not read version/download_url for $owner/$name from the API response.
-       Re-run with --keep-downloads and inspect $WORK/$name.json"
+  api_get "$owner" "$R_NAME" "$reg" "$WORK/$R_NAME.json"
+  R_VER="$(json_scalar "$WORK/$R_NAME.json" version_number)"
+  R_URL="$(json_scalar "$WORK/$R_NAME.json" download_url)"
+  [ -n "$R_VER" ] && [ -n "$R_URL" ] \
+    || die "could not read version/download_url for $owner/$R_NAME from the API response.
+       Re-run with --keep-downloads and inspect $WORK/$R_NAME.json"
 
-  prev="$(installed_version "$name")"
-  if [ "$FORCE" -eq 1 ]; then act="reinstall"
-  elif [ -z "$prev" ];        then act="install"
-  elif [ "$prev" != "$ver" ]; then act="updated"
-  else                             act="unchanged"; fi
-  if [ "$act" != "unchanged" ]; then changed=$((changed + 1)); fi
-
-  NAMES+=("$name"); VERS+=("$ver"); URLS+=("$url")
-  PREV+=("$prev");  ACTION+=("$act")
+  R_PREV="$(installed_version "$R_NAME")"
+  if [ "$FORCE" -eq 1 ]; then R_ACT="reinstall"
+  elif [ -z "$R_PREV" ];          then R_ACT="install"
+  elif [ "$R_PREV" != "$R_VER" ]; then R_ACT="updated"
+  else                                 R_ACT="unchanged"; fi
 }
 
-for entry in "${MODS[@]}"; do resolve_one "$entry"; done
+# The loader installs differently from the mods, so it keeps its own variables.
+resolve "$BEPINEX"
+bname="$R_NAME"; bver="$R_VER"; burl="$R_URL"; bprev="$R_PREV"; bact="$R_ACT"
 
-i=0
-while [ $i -lt ${#NAMES[@]} ]; do
-  case "${ACTION[$i]}" in
+for entry in "${MODS[@]}"; do
+  resolve "$entry"
+  if [ "$R_ACT" != "unchanged" ]; then changed=$((changed + 1)); fi
+  NAMES+=("$R_NAME"); VERS+=("$R_VER"); URLS+=("$R_URL")
+  PREV+=("$R_PREV");  ACTION+=("$R_ACT")
+done
+
+# Mods plus the loader: what a run would actually touch.
+pending=$changed
+if [ "$bact" != "unchanged" ]; then pending=$((pending + 1)); fi
+
+print_row() { # <name> <ver> <prev> <action>
+  local note
+  case "$4" in
     unchanged) note="" ;;
     install)   note="new" ;;
-    *)         note="(was ${PREV[$i]})  ${ACTION[$i]}" ;;
+    *)         note="(was $3)  $4" ;;
   esac
-  printf '    %-36s %-9s %s\n' "${NAMES[$i]}" "${VERS[$i]}" "$note"
+  printf '    %-36s %-9s %s\n' "$1" "$2" "$note"
+}
+
+print_row "$bname" "$bver" "$bprev" "$bact"
+i=0
+while [ $i -lt ${#NAMES[@]} ]; do
+  print_row "${NAMES[$i]}" "${VERS[$i]}" "${PREV[$i]}" "${ACTION[$i]}"
   i=$((i + 1))
 done
 
@@ -274,15 +294,16 @@ done
 step "Checking against the versions TheCob's pack pins"
 api_get "$PACK_OWNER" "$PACK_NAME" "$PACK_REG" "$WORK/_pack.json"
 drift=0; unknown=""
+ALL_NAMES=("$bname" "${NAMES[@]}"); ALL_VERS=("$bver" "${VERS[@]}")
 while IFS= read -r dep; do
   [ -n "$dep" ] || continue
   dver="${dep##*-}"; drest="${dep%-*}"; dname="${drest#*-}"
   j=0; known=0
-  while [ $j -lt ${#NAMES[@]} ]; do
-    if [ "${NAMES[$j]}" = "$dname" ]; then
+  while [ $j -lt ${#ALL_NAMES[@]} ]; do
+    if [ "${ALL_NAMES[$j]}" = "$dname" ]; then
       known=1
-      if [ "${VERS[$j]}" != "$dver" ]; then
-        printf '    %-36s newest %-9s pack pins %s\n' "$dname" "${VERS[$j]}" "$dver"
+      if [ "${ALL_VERS[$j]}" != "$dver" ]; then
+        printf '    %-36s newest %-9s pack pins %s\n' "$dname" "${ALL_VERS[$j]}" "$dver"
         drift=$((drift + 1))
       fi
       break
@@ -295,18 +316,18 @@ done < <(json_deps "$WORK/_pack.json")
 if [ "$drift" -eq 0 ]; then
   say "    in sync with the pack"
 else
-  warn "$drift mod(s) ahead of what the pack pins — expected on this mode, but"
+  warn "$drift package(s) ahead of what the pack pins — expected on this mode, but"
   warn "   it is the first thing to check if the server behaves oddly for you."
 fi
 if [ -n "$unknown" ]; then warn "pack now lists mods this script doesn't track:$unknown"; fi
 
 if [ "$CHECK_ONLY" -eq 1 ]; then
   say ""
-  say "--check: nothing was modified. $changed mod(s) would change."
+  say "--check: nothing was modified. $pending package(s) would change."
   exit 0
 fi
 
-if [ "$changed" -eq 0 ]; then
+if [ "$pending" -eq 0 ]; then
   say ""
   say "Everything already at newest. Nothing to do."
   exit 0
@@ -321,15 +342,7 @@ fetch() { # <url> <out> <label>
     || die "not a valid zip: $3 (a proxy may have returned an error page)"
 }
 
-bname="${BEPINEX%%|*}"; brest="${BEPINEX#*|}"
-bowner="${brest%%|*}"; breg="${brest#*|}"
-
-api_get "$bowner" "$bname" "$breg" "$WORK/_bepinex.json"
-bver="$(json_scalar "$WORK/_bepinex.json" version_number)"
-burl="$(json_scalar "$WORK/_bepinex.json" download_url)"
-bprev="$(installed_version "$bname")"
-
-if [ ! -d "$VALHEIM/BepInEx" ] || [ "$bprev" != "$bver" ] || [ "$FORCE" -eq 1 ]; then
+if [ ! -d "$VALHEIM/BepInEx" ] || [ "$bact" != "unchanged" ]; then
   step "Installing BepInEx $bver${bprev:+ (was $bprev)}"
   fetch "$burl" "$WORK/bepinex.zip" "BepInEx $bver"
   mkdir -p "$WORK/x/_bepinex"
@@ -353,9 +366,9 @@ mkdir -p "$VALHEIM/BepInEx/plugins" "$VALHEIM/BepInEx/config"
 
 # -------------------------------------------------------------------- mods
 
-install_mod() { # <name> <zip>
+install_mod() { # <name> <zip>  -> sets CFG_NEW, CFG_KEPT
   local name="$1" zip="$2" tmp="$WORK/x/$name"
-  local found=0 sub dest f
+  local found=0 root sub dest rel
 
   mkdir -p "$tmp"
   unzip -qo "$zip" -d "$tmp"
@@ -368,27 +381,35 @@ install_mod() { # <name> <zip>
     fi
   done
 
-  for sub in plugins patchers core; do
-    if [ -d "$tmp/$sub" ]; then
-      found=1
-      dest="$VALHEIM/BepInEx/$sub/$name"
-      mkdir -p "$dest"
-      ( cd "$tmp/$sub" && find . -mindepth 1 -maxdepth 1 -exec cp -R {} "$dest/" \; )
-    fi
-  done
-
-  # Bundled configs are defaults: only place ones the user doesn't already have.
-  if [ -d "$tmp/config" ]; then
-    found=1
-    for f in "$tmp/config"/*; do
-      [ -e "$f" ] || continue
-      if [ -e "$VALHEIM/BepInEx/config/$(basename "$f")" ]; then
-        say "    keeping your existing config/$(basename "$f")"
-      else
-        cp -R "$f" "$VALHEIM/BepInEx/config/"
+  # Files sit either at the top of the zip or one level down under BepInEx/,
+  # which is how Gale exports a modpack's configs.
+  CFG_NEW=0; CFG_KEPT=0
+  for root in "$tmp" "$tmp/BepInEx"; do
+    for sub in plugins patchers core; do
+      if [ -d "$root/$sub" ]; then
+        found=1
+        dest="$VALHEIM/BepInEx/$sub/$name"
+        mkdir -p "$dest"
+        ( cd "$root/$sub" && find . -mindepth 1 -maxdepth 1 -exec cp -R {} "$dest/" \; )
       fi
     done
-  fi
+
+    # Bundled configs are defaults: place each file, subfolders included,
+    # only if the user doesn't already have it.
+    if [ -d "$root/config" ]; then
+      found=1
+      while IFS= read -r rel; do
+        rel="${rel#./}"
+        if [ -e "$VALHEIM/BepInEx/config/$rel" ]; then
+          CFG_KEPT=$((CFG_KEPT + 1))
+        else
+          mkdir -p "$(dirname "$VALHEIM/BepInEx/config/$rel")"
+          cp "$root/config/$rel" "$VALHEIM/BepInEx/config/$rel"
+          CFG_NEW=$((CFG_NEW + 1))
+        fi
+      done < <(cd "$root/config" && find . -type f)
+    fi
+  done
 
   if [ "$found" -eq 0 ]; then
     dest="$VALHEIM/BepInEx/plugins/$name"
@@ -399,10 +420,14 @@ install_mod() { # <name> <zip>
         -exec cp -R {} "$dest/" \; )
   fi
 
+  # A package that ships configs and no code at all (the modpack) is complete.
+  if [ -z "$(find "$tmp" -name '*.dll' | head -1)" ] && [ $((CFG_NEW + CFG_KEPT)) -gt 0 ]; then
+    return 0
+  fi
   [ -n "$(find "$VALHEIM/BepInEx" -path "*/$name/*" -name '*.dll' 2>/dev/null | head -1)" ]
 }
 
-step "Installing $changed change(s)"
+if [ "$changed" -gt 0 ]; then step "Installing $changed change(s)"; fi
 failed=0
 i=0
 while [ $i -lt ${#NAMES[@]} ]; do
@@ -410,9 +435,13 @@ while [ $i -lt ${#NAMES[@]} ]; do
   name="${NAMES[$i]}"; ver="${VERS[$i]}"
   fetch "${URLS[$i]}" "$WORK/$name.zip" "$name $ver"
   if install_mod "$name" "$WORK/$name.zip"; then
-    say "    ok   $name $ver"
+    note=""
+    if [ $((CFG_NEW + CFG_KEPT)) -gt 0 ]; then
+      note="  (configs: $CFG_NEW added, $CFG_KEPT existing kept)"
+    fi
+    say "    ok   $name $ver$note"
   else
-    warn "$name $ver: no .dll found (config-only package?) — worth a look"
+    warn "$name $ver: no .dll found — worth a look"
     failed=$((failed + 1))
   fi
   i=$((i + 1))

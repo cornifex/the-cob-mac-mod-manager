@@ -53,7 +53,7 @@ Reports loader files, the executable bit on `start_game_bepinex.sh`, every plugi
 
 ## What it won't break
 
-- **Your configs.** Anything already in `BepInEx/config/` is left alone. A mod's bundled config is treated as a default and only placed if you don't already have that file. This includes `BepInEx.cfg` when the loader itself upgrades.
+- **Your configs.** Anything already in `BepInEx/config/` is left alone. A mod's bundled config is treated as a default and only placed if you don't already have that file. This includes `BepInEx.cfg` when the loader itself upgrades, and the configs TheCob's pack ships, so a fresh install starts with the pack's settings. Settings marked `[Synced with Server]` come from the server while you're connected, whatever your file says.
 - **Your old versions.** A replaced mod is moved to `BepInEx/.replaced-<timestamp>/`, never deleted. A bad update is a drag-back.
 - **Anything outside Valheim.** The script refuses to run against a directory that doesn't look like a Valheim install, and downloads to a temp dir it removes on exit.
 
@@ -64,7 +64,7 @@ This tracks **the newest version of each mod**, not the versions TheCob's pack p
 ```
 ==> Checking against the versions TheCob's pack pins
     Jotunn          newest 2.31.1   pack pins 2.30.0
-    !  1 mod(s) ahead of what the pack pins
+    !  1 package(s) ahead of what the pack pins
 ```
 
 Not an error. But `ConditionalConfigSync` means the server pushes config down to clients, so version drift is the first thing to check if the server misbehaves for you and nobody else. If the pack later adds a mod this script doesn't track, it says so.
@@ -81,13 +81,17 @@ To pin to the pack instead, replace the resolver with the pack's own `latest.dep
 | Recycle_N_Reclaim | Azumatt |
 | AzuCraftyBoxes | Azumatt |
 | AAA_Crafting | Azumatt |
+| AzuAreaRepair | Azumatt |
 | OdinHorse | OdinPlus |
 | MultiUserChest | MSchmoecker |
 | ConditionalConfigSync | shudnal |
 | ExtraSlots | shudnal |
+| UsefulPaths | RustyMods |
+| Sailing | Smoothbrain |
 | Quick_Stack_Store_Sort_Trash_Restock | Goldenrevolver |
+| Pathfinder | Crystal |
 
-Ten resolve from [Hexium](https://valheim.hexium.gg/); `Quick_Stack_Store_Sort_Trash_Restock` isn't published there and resolves from [Thunderstore](https://thunderstore.io/c/valheim/p/Goldenrevolver/Quick_Stack_Store_Sort_Trash_Restock/). Both serve the same Thunderstore-shaped API, so one resolver handles both:
+Thirteen resolve from [Hexium](https://valheim.hexium.gg/). Two aren't published there and resolve from Thunderstore: [`Quick_Stack_Store_Sort_Trash_Restock`](https://thunderstore.io/c/valheim/p/Goldenrevolver/Quick_Stack_Store_Sort_Trash_Restock/) and [`Pathfinder`](https://thunderstore.io/c/valheim/p/Crystal/Pathfinder/). Both registries serve the same Thunderstore-shaped API, so one resolver handles both:
 
 ```
 GET {registry}/api/experimental/package/{owner}/{name}/
