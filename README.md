@@ -1,55 +1,80 @@
-# the-cob-mac-mod-manager
+# TheCob mod manager for macOS, Linux and Steam Deck
 
-A single-file installer and updater for the [TheCob](https://valheim.hexium.gg/mods/TheCob/TheCob) Valheim modpack on macOS.
+A single-file installer and updater for the [TheCob](https://valheim.hexium.gg/mods/TheCob/TheCob) Valheim modpack on macOS, Linux and Steam Deck.
 
-There is no mod manager for macOS. [Gale](https://github.com/Kesomannen/gale) ships Windows and Linux builds only, and so does [r2modman](https://github.com/ebkr/r2modmanPlus). This script covers the gap: it resolves the newest version of every mod in the pack, installs what changed, and leaves everything else alone.
+There is no mod manager for macOS: [Gale](https://github.com/Kesomannen/gale) ships Windows and Linux builds only, and so does [r2modman](https://github.com/ebkr/r2modmanPlus). This script covers that gap, and runs the same way on Linux and Steam Deck, so every machine you play on is set up with one command. It resolves the newest version of every mod in the pack, installs what changed, and leaves everything else alone.
 
 ## Requirements
 
-- macOS with Valheim installed through Steam
+**macOS**
+
+- Valheim installed through Steam
 - Rosetta 2 — `softwareupdate --install-rosetta` (Apple Silicon only)
-- `curl` and `unzip`, both stock on macOS. `jq` is used when present and not required.
+- `curl` and `unzip`, both stock on macOS
+
+**Linux and Steam Deck**
+
+- Valheim installed through Steam: the native Linux build, or the Windows build under Proton. Steam can be the distro package, the Flatpak, or SteamOS's own.
+- `curl` and `unzip`. The script checks for both before doing anything and names whichever is missing.
+
+On either platform, `jq` is used when present and not required.
 
 ## Install
 
 ```sh
-bash the-cob-mac-mod-manager.sh
+bash thecob-valheim-mods.sh
 ```
 
-It finds Valheim at the default Steam path, or in any library listed in `libraryfolders.vdf`. If detection fails, point it directly:
+On Steam Deck, switch to Desktop Mode, open Konsole, and run the same command.
+
+It checks each Steam install (on Linux: `~/.local/share/Steam`, `~/.steam/steam`, `~/.steam/root` and the Flatpak's), then every library that install lists in `libraryfolders.vdf`, so a game on an SD card or a second drive is found. It prints the folder it picked and which build of Valheim is there:
+
+```
+==> Locating Valheim
+    /run/media/deck/SDCARD/steamapps/common/Valheim
+    runtime: linux-native (native Linux build)
+```
+
+If detection fails, point it directly:
 
 ```sh
-bash the-cob-mac-mod-manager.sh --dir "/path/to/steamapps/common/Valheim"
+bash thecob-valheim-mods.sh --dir "/path/to/steamapps/common/Valheim"
 ```
 
-### Then set the Steam launch options — once
+### Then set the Steam launch options — once per machine
 
-Steam → Valheim → Properties → General → Launch Options:
+Steam → Valheim → Properties → General → Launch Options. Which line depends on the build of Valheim you run; the script prints the right one after a first install, and `--verify` checks it:
 
-```
-/usr/bin/arch -x86_64 /bin/bash ./start_game_bepinex.sh %command%
-```
+| Build (`runtime:`) | Where | Launch options |
+|---|---|---|
+| `mac` | macOS | `/usr/bin/arch -x86_64 /bin/bash ./start_game_bepinex.sh %command%` |
+| `linux-native` | Linux and Steam Deck, by default | `./start_game_bepinex.sh %command%` |
+| `proton` | Linux and Steam Deck, with a Proton version forced under Properties → Compatibility | `WINEDLLOVERRIDES="winhttp=n,b" %command%` |
 
-**This is not optional on Apple Silicon.** BepInEx 5 depends on MonoMod, which has [no arm64 support](https://github.com/BepInEx/BepInEx/issues/899), so the game must be forced through Rosetta. Leave off `arch -x86_64` and Valheim launches perfectly normally with none of your mods loaded — which is the confusing part, because nothing appears to be broken.
+**On macOS, `arch -x86_64` is not optional on Apple Silicon.** BepInEx 5 depends on MonoMod, which has [no arm64 support](https://github.com/BepInEx/BepInEx/issues/899), so the game must be forced through Rosetta. Leave it off and Valheim launches perfectly normally with none of your mods loaded — which is the confusing part, because nothing appears to be broken.
 
-The script deliberately does not set this for you. Steam stores launch options in `localconfig.vdf` and rewrites that file on exit, so an edit made while Steam is running is silently discarded, and a bad patch lands in the same file as every other game's settings.
+**On Steam Deck, set them in Desktop Mode**, in the Steam window there. They carry over into Game Mode.
+
+**Under Proton, keep the quotes exactly as shown.** The override makes Proton load BepInEx's `winhttp.dll` instead of its own; without it, the game runs with no mods.
+
+The script deliberately does not set launch options for you. Steam stores launch options in `localconfig.vdf` and rewrites that file on exit, so an edit made while Steam is running is silently discarded, and a bad patch lands in the same file as every other game's settings.
 
 ## Usage
 
 ```sh
-bash the-cob-mac-mod-manager.sh              # install, or update to newest
-bash the-cob-mac-mod-manager.sh --check      # report what would change, touch nothing
-bash the-cob-mac-mod-manager.sh --verify     # inspect what's installed; no network, no writes
-bash the-cob-mac-mod-manager.sh --force      # reinstall everything at newest
-bash the-cob-mac-mod-manager.sh --dir PATH   # point at Valheim explicitly
-bash the-cob-mac-mod-manager.sh --keep-downloads
+bash thecob-valheim-mods.sh              # install, or update to newest
+bash thecob-valheim-mods.sh --check      # report what would change, touch nothing
+bash thecob-valheim-mods.sh --verify     # inspect what's installed; no network, no writes
+bash thecob-valheim-mods.sh --force      # reinstall everything at newest
+bash thecob-valheim-mods.sh --dir PATH   # point at Valheim explicitly
+bash thecob-valheim-mods.sh --keep-downloads
 ```
 
 Re-run it whenever you want updates. It records installed versions in `BepInEx/.modpack-versions`, compares against what the registries currently serve, and downloads only what actually changed — a run with nothing new exits in a couple of seconds.
 
 ### `--verify`
 
-Reports loader files, the executable bit on `start_game_bepinex.sh`, every plugin folder with its version and DLL count, whether Rosetta 2 is present, and — reading `localconfig.vdf` read-only — whether your Steam launch options are correct. It distinguishes the three states that matter: correct, running the launcher without `-x86_64`, and not running it at all.
+Reports the loader files your build of Valheim needs, the executable bit on `start_game_bepinex.sh` (macOS and native Linux), every plugin folder with its version and DLL count, whether Rosetta 2 is present (macOS), and — reading `localconfig.vdf` read-only — whether your Steam launch options suit the build it found. Besides options that are missing or incomplete, it catches the ones meant for a different build: the Proton override on a native build, the native launcher under Proton, and the macOS Rosetta wrapper on Linux. Every problem it reports comes with the line to use instead.
 
 ## What it won't break
 
@@ -107,6 +132,10 @@ The loader is [BepInExPack Valheim](https://valheim.hexium.gg/mods/denikson/BepI
 **Game launches, no mods.** Launch options. Run `--verify`.
 
 **No `BepInEx/LogOutput.log` after launching.** Same — the launch options never took effect.
+
+**Worked on one machine but not the other.** Usually launch options. Steam keeps them in each machine's own `localconfig.vdf`, so setting them on your Mac doesn't set them on your Deck. And each build needs its own line: the Mac line on a Deck, or the native line after switching Valheim to Proton, loads no mods. Run `--verify` on the machine that isn't working; it names the mismatch and prints the right line. If launch options check out, run the script on both machines so they have the same mod versions before comparing further.
+
+**Mods stopped loading after Steam's Verify Integrity, an update, a reinstall, or moving the game.** Run `--verify`. If any loader file shows `MISS`, run the script with `--force`. A plain re-run isn't enough when only part of the loader is gone, because the version record in `BepInEx/` still says everything is installed. `--force` reinstalls the loader and every mod, keeps your configs, and moves the old copies to `BepInEx/.replaced-<timestamp>/`.
 
 **A mod misbehaves after an update.** Its previous copy is in `BepInEx/.replaced-<timestamp>/`. Move it back and pin that version.
 
